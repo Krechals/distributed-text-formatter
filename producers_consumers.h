@@ -65,6 +65,8 @@ class Producer_Consumer {
     			consumers[i] = std::thread(&Producer_Consumer::consumer_horror, this);
     		} else if (id == COMEDY_ID) {
     			consumers[i] = std::thread(&Producer_Consumer::consumer_comedy, this);
+    		} else if (id == FANTASY_ID) {
+    			consumers[i] = std::thread(&Producer_Consumer::consumer_fantasy, this);
     		}
     	}
     	std::thread receiver = std::thread(&Producer_Consumer::receiver, this);
@@ -102,6 +104,48 @@ class Producer_Consumer {
 		} while(strcmp(buff, END_OF_FILE));
 		end = true;
 		consume.notify_all();
+	}
+
+	void consumer_fantasy() {
+		std::unique_lock<std::mutex> lck(mtx);
+		while(!end.load()) {
+			consume.wait(lck);
+			if (end.load() == true) {
+				break;
+			}
+		 	int ticket = get_ticket();
+		 	int remaining_lines = 0;
+
+		 	while(ticket <= line_nr / 20) {
+		 		remaining_lines = 20 * ticket + 1;
+		 		int i = 0;
+		 		while (i < buffer.size() && remaining_lines > 0) {
+		 			if (buffer[i] == '\n') {
+		 				--remaining_lines;
+		 			}
+		 			++i;
+		 		}
+
+		 		remaining_lines = 20;
+		 		int letter_index = 0;
+		 		while (i < buffer.size() && remaining_lines > 0) {
+		 			if (buffer[i] == '\n') {
+		 				--remaining_lines;
+		 			}
+
+		 			if ((buffer[i - 1] == ' ' || buffer[i - 1] == '\n') && letter(buffer[i])) {
+		 				buffer[i] = std::toupper(buffer[i]);
+		 			}
+		 			++i;
+		 		}
+
+		 		ticket = get_ticket();
+		 	}
+		 	if (remaining_lines > 0) {
+		 		produce.notify_one();
+		 		current_ticket = 0;
+		 	}
+		}
 	}
 
 	void consumer_comedy() {
