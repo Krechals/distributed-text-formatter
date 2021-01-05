@@ -5,6 +5,10 @@
 #include <atomic>
 
 #define ROOT 0
+#define HORROR_ID 1
+#define COMEDY_ID 2
+#define FANTASY_ID 3
+#define SCIFI_ID 4
 #define MAX_PARAGRAPH 10000
 #define END_OF_FILE "==EOF=="
 
@@ -42,6 +46,10 @@ class Producer_Consumer {
 			letter != '\n' && letter != '.' && letter != ' ';
 	}
 
+	bool letter(char letter) {
+		return (letter >= 'a' && letter <= 'z') || (letter >= 'A' && letter <= 'Z');
+	} 
+
  public:
  	Producer_Consumer() {
  		end = false;
@@ -49,11 +57,15 @@ class Producer_Consumer {
  		pthread_barrier_init(&barrier, NULL, std::thread::hardware_concurrency());
  	}
 
- 	void parallelise() {
+ 	void parallelise(int id) {
  		int num_threads = std::thread::hardware_concurrency() - 1;
     	std::thread consumers[num_threads];
     	for (int i = 0; i < num_threads; ++i) {
-    		consumers[i] = std::thread(&Producer_Consumer::consumer, this);
+    		if (id == HORROR_ID) {
+    			consumers[i] = std::thread(&Producer_Consumer::consumer_horror, this);
+    		} else if (id == COMEDY_ID) {
+    			consumers[i] = std::thread(&Producer_Consumer::consumer_comedy, this);
+    		}
     	}
     	std::thread receiver = std::thread(&Producer_Consumer::receiver, this);
 
@@ -85,14 +97,15 @@ class Producer_Consumer {
 				}
 
 				produce.wait(lck);
+				MPI_Send(&buffer[0], buffer.size() + 1, MPI_CHAR, ROOT, 0, MPI_COMM_WORLD);
 			}
 		} while(strcmp(buff, END_OF_FILE));
 		end = true;
 		consume.notify_all();
 	}
 
- 	void consumer() {
- 		std::unique_lock<std::mutex> lck(mtx);
+	void consumer_comedy() {
+		std::unique_lock<std::mutex> lck(mtx);
 		while(!end.load()) {
 			consume.wait(lck);
 			if (end.load() == true) {
@@ -100,6 +113,7 @@ class Producer_Consumer {
 			}
 		 	int ticket = get_ticket();
 		 	int remaining_lines = 0;
+
 		 	while(ticket <= line_nr / 20) {
 		 		remaining_lines = 20 * ticket + 1;
 		 		int i = 0;
@@ -109,6 +123,53 @@ class Producer_Consumer {
 		 			}
 		 			++i;
 		 		}
+
+		 		remaining_lines = 20;
+		 		int letter_index = 0;
+		 		while (i < buffer.size() && remaining_lines > 0) {
+		 			if (buffer[i] == '\n') {
+		 				--remaining_lines;
+		 			}
+
+		 			if (buffer[i] == ' ') {
+		 				letter_index = 0;
+		 			} else if (letter(buffer[i])) {
+		 				if (letter_index++ % 2) {
+		 					buffer[i] = std::toupper(buffer[i]);
+		 				}
+		 			}
+		 			++i;
+		 		}
+
+		 		ticket = get_ticket();
+		 	}
+		 	if (remaining_lines > 0) {
+		 		produce.notify_one();
+		 		current_ticket = 0;
+		 	}
+		}
+	}
+
+ 	void consumer_horror() {
+ 		std::unique_lock<std::mutex> lck(mtx);
+		while(!end.load()) {
+			consume.wait(lck);
+			if (end.load() == true) {
+				break;
+			}
+		 	int ticket = get_ticket();
+		 	int remaining_lines = 0;
+
+		 	while(ticket <= line_nr / 20) {
+		 		remaining_lines = 20 * ticket + 1;
+		 		int i = 0;
+		 		while (i < buffer.size() && remaining_lines > 0) {
+		 			if (buffer[i] == '\n') {
+		 				--remaining_lines;
+		 			}
+		 			++i;
+		 		}
+
 		 		remaining_lines = 20;
 		 		while (i < buffer.size() && remaining_lines > 0) {
 		 			if (buffer[i] == '\n') {
@@ -124,7 +185,6 @@ class Producer_Consumer {
 
 		 		ticket = get_ticket();
 		 	}
-		 	cout << buffer << endl;
 		 	if (remaining_lines > 0) {
 		 		produce.notify_one();
 		 		current_ticket = 0;
