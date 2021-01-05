@@ -72,7 +72,16 @@ void parse(int id) {
 			cout << buff << endl;
 		} else if (line == "science-fiction" && id == SCIFI_ID) {
 			paragraph = "science-fiction" + parse_paragraph(fin);
-			MPI_Send(&paragraph[0], paragraph.size() + 1, MPI_CHAR, id, 0, MPI_COMM_WORLD); 
+			MPI_Send(&paragraph[0], paragraph.size() + 1, MPI_CHAR, id, 0, MPI_COMM_WORLD);
+
+			MPI_Status status;
+			int length = 0;
+
+			MPI_Probe(SCIFI_ID, 0, MPI_COMM_WORLD, &status);
+			MPI_Get_count(&status, MPI_CHAR, &length);
+
+			MPI_Recv(&buff, length, MPI_CHAR, SCIFI_ID, 0, MPI_COMM_WORLD, &status);
+			cout << buff << endl;
 		} 
  	}
 
@@ -108,7 +117,8 @@ int main(int argc, char *argv[]) {
     	Producer_Consumer fantasy;
     	fantasy.parallelise(FANTASY_ID);
     } else if (rank == SCIFI_ID) {
-    	// TODO
+    	Producer_Consumer scifi;
+    	scifi.parallelise(SCIFI_ID);
     } 
 
 	MPI_Finalize();

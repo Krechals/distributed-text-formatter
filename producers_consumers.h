@@ -48,7 +48,16 @@ class Producer_Consumer {
 
 	bool letter(char letter) {
 		return (letter >= 'a' && letter <= 'z') || (letter >= 'A' && letter <= 'Z');
-	} 
+	}
+
+	int count_letters(int start) {
+		int ans = 0;
+
+		for (int letter_index = start; buffer[letter_index] != ' ' && buffer[letter_index] != '\n' && buffer[letter_index] != '\0'; ++letter_index) {
+			++ans;
+		}
+		return ans;
+	}
 
  public:
  	Producer_Consumer() {
@@ -67,6 +76,9 @@ class Producer_Consumer {
     			consumers[i] = std::thread(&Producer_Consumer::consumer_comedy, this);
     		} else if (id == FANTASY_ID) {
     			consumers[i] = std::thread(&Producer_Consumer::consumer_fantasy, this);
+    		} else if (id == SCIFI_ID) {
+    			consumers[i] = std::thread(&Producer_Consumer::consumer_scifi, this);
+
     		}
     	}
     	std::thread receiver = std::thread(&Producer_Consumer::receiver, this);
@@ -106,6 +118,58 @@ class Producer_Consumer {
 		consume.notify_all();
 	}
 
+	void consumer_scifi() {
+		std::unique_lock<std::mutex> lck(mtx);
+		while(!end.load()) {
+			consume.wait(lck);
+			if (end.load() == true) {
+				break;
+			}
+		 	int ticket = get_ticket();
+		 	int remaining_lines = 0;
+
+		 	while(ticket <= line_nr / 20) {
+		 		remaining_lines = 20 * ticket + 1;
+		 		int i = 0;
+		 		while (i < buffer.size() && remaining_lines > 0) {
+		 			if (buffer[i] == '\n') {
+		 				--remaining_lines;
+		 			}
+		 			++i;
+		 		}
+
+		 		remaining_lines = 20;
+		 		int word_index = 0;
+		 		while (i < buffer.size() && remaining_lines > 0) {
+		 			if (buffer[i] == '\n') {
+		 				--remaining_lines;
+		 				word_index = 0;
+		 			}
+
+		 			if ((buffer[i - 1] == ' ' || buffer[i - 1] == '\n')) {
+		 				++word_index;
+		 				if (word_index == 7) {
+		 					int left = i, right = i + count_letters(i) - 1;
+
+		 					while (left < right) {
+		 						swap(buffer[left], buffer[right]);
+		 						++left;
+		 						--right;
+		 					}	
+		 				}
+		 			}
+		 			++i;
+		 		}
+
+		 		ticket = get_ticket();
+		 	}
+		 	if (remaining_lines > 0) {
+		 		produce.notify_one();
+		 		current_ticket = 0;
+		 	}
+		}
+	}
+
 	void consumer_fantasy() {
 		std::unique_lock<std::mutex> lck(mtx);
 		while(!end.load()) {
@@ -127,7 +191,6 @@ class Producer_Consumer {
 		 		}
 
 		 		remaining_lines = 20;
-		 		int letter_index = 0;
 		 		while (i < buffer.size() && remaining_lines > 0) {
 		 			if (buffer[i] == '\n') {
 		 				--remaining_lines;
