@@ -14,6 +14,11 @@
 
 using namespace std;
 
+std::atomic<unsigned int> paragraph_id(1);
+std::mutex mtx;
+std::condition_variable order;
+std::string output_text;
+
 string parse_paragraph(ifstream &fin) {
 	std::string ans = "";
 	std::string line;
@@ -28,13 +33,23 @@ string parse_paragraph(ifstream &fin) {
 }
 
 void parse(int id) {
-	ifstream fin("input.txt");
+	std::unique_lock<std::mutex> lck(mtx);
+
+	int current_paragraph = 0;
+	unordered_map<int, string> paragraph_order;
+	ifstream fin("input.in");
+	
 	std::string line;
 	std::string paragraph;
  	char buff[MAX_PARAGRAPH] = {0};
 
 	while (getline(fin, line)) {
-		if (line == "horror" && id == HORROR_ID) {
+		if (line == "horror") {
+			++current_paragraph;
+			if (id != HORROR_ID) {
+				continue;
+			}
+
 			paragraph = "horror" + parse_paragraph(fin);
 			MPI_Send(&paragraph[0], paragraph.size() + 1, MPI_CHAR, id, 0, MPI_COMM_WORLD);
 
@@ -45,8 +60,16 @@ void parse(int id) {
 			MPI_Get_count(&status, MPI_CHAR, &length);
 
 			MPI_Recv(&buff, length, MPI_CHAR, HORROR_ID, 0, MPI_COMM_WORLD, &status);
-			cout << buff << endl;
-		} else if (line == "comedy" && id == COMEDY_ID) {
+			string buffer = buff;
+
+			paragraph_order[current_paragraph] = buffer;
+			// cout << buff << endl;
+		} else if (line == "comedy") {
+			++current_paragraph;
+			if (id != COMEDY_ID) {
+				continue;
+			}
+
 			paragraph = "comedy" + parse_paragraph(fin);
 			MPI_Send(&paragraph[0], paragraph.size() + 1, MPI_CHAR, id, 0, MPI_COMM_WORLD);
 
@@ -57,8 +80,16 @@ void parse(int id) {
 			MPI_Get_count(&status, MPI_CHAR, &length);
 
 			MPI_Recv(&buff, length, MPI_CHAR, COMEDY_ID, 0, MPI_COMM_WORLD, &status);
-			cout << buff << endl;
-		} else if (line == "fantasy" && id == FANTASY_ID) {
+			string buffer = buff;
+
+			paragraph_order[current_paragraph] = buffer;
+			// cout << buff << endl;
+		} else if (line == "fantasy") {
+			++current_paragraph;
+			if (id != FANTASY_ID) {
+				continue;
+			}
+
 			paragraph = "fantasy" + parse_paragraph(fin);
 			MPI_Send(&paragraph[0], paragraph.size() + 1, MPI_CHAR, id, 0, MPI_COMM_WORLD);
 
@@ -69,8 +100,16 @@ void parse(int id) {
 			MPI_Get_count(&status, MPI_CHAR, &length);
 
 			MPI_Recv(&buff, length, MPI_CHAR, FANTASY_ID, 0, MPI_COMM_WORLD, &status);
-			cout << buff << endl;
-		} else if (line == "science-fiction" && id == SCIFI_ID) {
+			string buffer = buff;
+
+			paragraph_order[current_paragraph] = buffer;
+			// cout << buff << endl;
+		} else if (line == "science-fiction") {
+			++current_paragraph;
+			if (id != SCIFI_ID) {
+				continue;
+			}
+
 			paragraph = "science-fiction" + parse_paragraph(fin);
 			MPI_Send(&paragraph[0], paragraph.size() + 1, MPI_CHAR, id, 0, MPI_COMM_WORLD);
 
@@ -81,12 +120,33 @@ void parse(int id) {
 			MPI_Get_count(&status, MPI_CHAR, &length);
 
 			MPI_Recv(&buff, length, MPI_CHAR, SCIFI_ID, 0, MPI_COMM_WORLD, &status);
-			cout << buff << endl;
+			string buffer = buff;
+
+			paragraph_order[current_paragraph] = buffer;
+			// cout << buff << endl;
 		} 
  	}
 
  	paragraph = END_OF_FILE;
- 	MPI_Send(&paragraph[0], paragraph.size() + 1, MPI_CHAR, id, 0, MPI_COMM_WORLD); 
+ 	MPI_Send(&paragraph[0], paragraph.size() + 1, MPI_CHAR, id, 0, MPI_COMM_WORLD);
+
+
+ 	for (unsigned int i = 1; i <= current_paragraph; ++i) {
+ 		if (paragraph_order.find(i) != paragraph_order.end()) {
+ 			while (i != paragraph_id) {
+ 				order.wait(lck);
+ 			}
+
+ 			if (i < current_paragraph) {
+ 				output_text += paragraph_order[i] + '\n';
+ 			} else {
+ 				output_text += paragraph_order[i];
+ 			}
+
+ 			++paragraph_id;
+ 			order.notify_all();
+ 		}
+ 	}
 }
 
 int main(int argc, char *argv[]) {
@@ -106,6 +166,8 @@ int main(int argc, char *argv[]) {
     	for (int i = 0; i < MASTER_THREADS; ++i) {
     		parsers[i].join();
     	}
+    	ofstream fout("input.out");
+    	fout << output_text;
     } else if (rank == HORROR_ID) {
     	Producer_Consumer horror;
     	horror.parallelise(HORROR_ID);
