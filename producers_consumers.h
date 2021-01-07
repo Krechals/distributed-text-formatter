@@ -1,7 +1,15 @@
 #pragma once
 
 #include "mpi.h"
-#include <bits/stdc++.h>
+
+#include <algorithm>
+#include <fstream>
+#include <thread>
+#include <functional>
+#include <mutex>
+#include <condition_variable>
+#include <unistd.h>
+#include <vector>
 #include <atomic>
 
 #define ROOT 0
@@ -9,293 +17,199 @@
 #define COMEDY_ID 2
 #define FANTASY_ID 3
 #define SCIFI_ID 4
-#define MAX_PARAGRAPH 10000
+#define MAX_PARAGRAPH 2000000
+#define END_OF_PARA "==EOP=="
 #define END_OF_FILE "==EOF=="
 
 using namespace std;
 
-class Producer_Consumer {
- private:
- 	string buffer;
- 	std::mutex mtx;
-	std::condition_variable produce, consume;
-	unsigned int line_nr;
-	int consumers_nr;
-	std::atomic<bool> end;
-	std::atomic<unsigned int> current_ticket;
-	pthread_barrier_t barrier;
+string buffer;
+std::mutex mtx_worker;
+std::condition_variable produce, consume;
+unsigned int line_nr = 0;
+int consumers_nr = 0;;
+std::atomic<bool> end{false};
+std::atomic<int> current_ticket{0};
+std::atomic<bool> end_turn{true};
+int num_threads = std::thread::hardware_concurrency() - 1;
+std::vector<std::string> small_paragraphs;  
 
-	int count_lines(string buffer) {
-		int ans = 0;
+unsigned int get_ticket() {
+	return current_ticket++;
+}
 
-		for (unsigned int i = 0; i < buffer.size(); ++i) {
-			if (buffer[i] == '\n') {
-				++ans;
-			}
-		}
-		return ans;
+bool consonant(char letter) {
+	return letter != 'A' && letter != 'E' && letter != 'I' && letter != 'O' && letter != 'U' &&
+		letter != 'a' && letter != 'e' && letter != 'i' && letter != 'o' && letter != 'u' && 
+		letter != '\n' && letter != '.' && letter != ' ';
+}
+
+bool letter(char letter) {
+	return (letter >= 'a' && letter <= 'z') || (letter >= 'A' && letter <= 'Z');
+}
+
+int count_letters(int start, int ticket) {
+	int ans = 0;
+
+	for (int letter_index = start; small_paragraphs[ticket][letter_index] != ' ' && 
+								   small_paragraphs[ticket][letter_index] != '\n' && 
+								   small_paragraphs[ticket][letter_index] != '\0'; ++letter_index) {
+		++ans;
 	}
+	return ans;
+}
 
-	unsigned int get_ticket() {
-		return current_ticket++;
+void consumer_scifi() {
+	int ticket = 0;
+	while(ticket <= small_paragraphs.size()) {
+	 	ticket = get_ticket();
+	 	int i = 0;
+	 	if (ticket < small_paragraphs.size()) {
+	 		int word_index = 0;
+	 		while (i < small_paragraphs[ticket].size()) {
+	 			if (small_paragraphs[ticket][i] == '\n') {
+	 				word_index = 0;
+	 			}
+
+	 			if (i == 0 || small_paragraphs[ticket][i - 1] == ' ' || small_paragraphs[ticket][i - 1] == '\n') {
+	 				++word_index;
+	 				if (word_index == 7) {
+	 					int left = i, right = i + count_letters(i, ticket) - 1;
+
+	 					while (left < right) {
+	 						swap(small_paragraphs[ticket][left], small_paragraphs[ticket][right]);
+	 						++left;
+	 						--right;
+	 					}
+	 					word_index = 0;
+	 				}
+	 			}
+	 			++i;
+	 		}
+	 	}
 	}
+}
 
-	bool consonant(char letter) {
-		return letter != 'A' && letter != 'E' && letter != 'I' && letter != 'O' && letter != 'U' &&
-			letter != 'a' && letter != 'e' && letter != 'i' && letter != 'o' && letter != 'u' && 
-			letter != '\n' && letter != '.' && letter != ' ';
+void consumer_fantasy() {
+	int ticket = 0;
+	while(ticket <= small_paragraphs.size()) {
+	 	ticket = get_ticket();
+	 	int i = 0;
+	 	if (ticket < small_paragraphs.size()) {
+	 		while (i < small_paragraphs[ticket].size()) {
+	 			if ((i == 0 || small_paragraphs[ticket][i - 1] == ' ' || small_paragraphs[ticket][i - 1] == '\n') && letter(small_paragraphs[ticket][i])) {
+	 				small_paragraphs[ticket][i] = std::toupper(small_paragraphs[ticket][i]);
+	 			}
+	 			++i;
+	 		}
+	 	}
 	}
+}
 
-	bool letter(char letter) {
-		return (letter >= 'a' && letter <= 'z') || (letter >= 'A' && letter <= 'Z');
+void consumer_comedy() {
+	int ticket = 0;
+	while(ticket <= small_paragraphs.size()) {
+	 	ticket = get_ticket();
+	 	int i = 0;
+	 	if (ticket < small_paragraphs.size()) {
+	 		int letter_index = 0;
+	 		while (i < small_paragraphs[ticket].size()) {
+	 			if (small_paragraphs[ticket][i] == '\n') {
+	 				letter_index = 0;
+	 			}
+
+	 			if (small_paragraphs[ticket][i] == '.') {
+	 				letter_index++;
+	 			}
+	 			if (small_paragraphs[ticket][i] == ' ') {
+	 				letter_index = 0;
+	 			} else if (letter(small_paragraphs[ticket][i])) {
+	 				if (letter_index++ % 2) {
+	 					small_paragraphs[ticket][i] = std::toupper(small_paragraphs[ticket][i]);
+	 				}
+	 			}
+	 			++i;
+	 		}
+	 	}
 	}
+}
 
-	int count_letters(int start) {
-		int ans = 0;
+void consumer_horror() {
+	int ticket = 0;
+	while(ticket <= small_paragraphs.size()) {
+	 	ticket = get_ticket();
+	 	int i = 0;
+	 	if (ticket < small_paragraphs.size()) {
 
-		for (int letter_index = start; buffer[letter_index] != ' ' && buffer[letter_index] != '\n' && buffer[letter_index] != '\0'; ++letter_index) {
-			++ans;
-		}
-		return ans;
+	 		while (i < small_paragraphs[ticket].size()) {
+	 			if (consonant(small_paragraphs[ticket][i])) {
+	 				std::string lower (1, std::tolower(small_paragraphs[ticket][i]));
+	 				small_paragraphs[ticket].insert(i + 1, lower);
+	 				++i;
+	 			}
+	 			++i;
+	 		}
+	 	}
 	}
+}
 
- public:
- 	Producer_Consumer() {
- 		end = false;
- 		current_ticket = 0;
- 		pthread_barrier_init(&barrier, NULL, std::thread::hardware_concurrency());
- 	}
-
- 	void parallelise(int id) {
- 		int num_threads = std::thread::hardware_concurrency() - 1;
-    	std::thread consumers[num_threads];
-    	for (int i = 0; i < num_threads; ++i) {
-    		if (id == HORROR_ID) {
-    			consumers[i] = std::thread(&Producer_Consumer::consumer_horror, this);
-    		} else if (id == COMEDY_ID) {
-    			consumers[i] = std::thread(&Producer_Consumer::consumer_comedy, this);
-    		} else if (id == FANTASY_ID) {
-    			consumers[i] = std::thread(&Producer_Consumer::consumer_fantasy, this);
-    		} else if (id == SCIFI_ID) {
-    			consumers[i] = std::thread(&Producer_Consumer::consumer_scifi, this);
-
-    		}
-    	}
-    	std::thread receiver = std::thread(&Producer_Consumer::receiver, this);
-
-		for (int i = 0; i < num_threads; ++i) {
-			consumers[i].join();
-		}
-		receiver.join();
-
- 	}
-
- 	void receiver() {
- 		std::unique_lock<std::mutex> lck(mtx);
- 		char buff[MAX_PARAGRAPH] = {0};
-		do {
+void recv(int id) {
+	char buff[MAX_PARAGRAPH] = {0};
+	std::thread consumers[num_threads];
+	while(1) {
+		small_paragraphs.clear();  
+		while(1) {
 			MPI_Status status;
 			int length = 0;
 
 			MPI_Probe(ROOT, 0, MPI_COMM_WORLD, &status);
 			MPI_Get_count(&status, MPI_CHAR, &length);
 
+			memset(buff, 0, MAX_PARAGRAPH);
 			MPI_Recv(&buff, length, MPI_CHAR, ROOT, 0, MPI_COMM_WORLD, &status);
+			buffer = "";
 			buffer = buff;
-			line_nr = count_lines(buffer) - 1;
-			consumers_nr = std::min(1 + line_nr / 20, std::thread::hardware_concurrency() - 1);
-
-			if (buffer != END_OF_FILE) {
-				for (int i = 0; i < consumers_nr; ++i) {
-					consume.notify_one();
-				}
-
-				produce.wait(lck);
-				MPI_Send(&buffer[0], buffer.size() + 1, MPI_CHAR, ROOT, 0, MPI_COMM_WORLD);
+			if (buffer == END_OF_FILE) {
+				return;
 			}
-		} while(strcmp(buff, END_OF_FILE));
-		end = true;
-		consume.notify_all();
-	}
-
-	void consumer_scifi() {
-		std::unique_lock<std::mutex> lck(mtx);
-		while(!end.load()) {
-			consume.wait(lck);
-			if (end.load() == true) {
+			if (buffer == END_OF_PARA) {
 				break;
 			}
-		 	int ticket = get_ticket();
-		 	int remaining_lines = 0;
-
-		 	while(ticket <= line_nr / 20) {
-		 		remaining_lines = 20 * ticket + 1;
-		 		int i = 0;
-		 		while (i < buffer.size() && remaining_lines > 0) {
-		 			if (buffer[i] == '\n') {
-		 				--remaining_lines;
-		 			}
-		 			++i;
-		 		}
-
-		 		remaining_lines = 20;
-		 		int word_index = 0;
-		 		while (i < buffer.size() && remaining_lines > 0) {
-		 			if (buffer[i] == '\n') {
-		 				--remaining_lines;
-		 				word_index = 0;
-		 			}
-
-		 			if ((buffer[i - 1] == ' ' || buffer[i - 1] == '\n')) {
-		 				++word_index;
-		 				if (word_index == 7) {
-		 					int left = i, right = i + count_letters(i) - 1;
-
-		 					while (left < right) {
-		 						swap(buffer[left], buffer[right]);
-		 						++left;
-		 						--right;
-		 					}	
-		 				}
-		 			}
-		 			++i;
-		 		}
-
-		 		ticket = get_ticket();
-		 	}
-		 	if (remaining_lines > 0) {
-		 		produce.notify_one();
-		 		current_ticket = 0;
-		 	}
+			small_paragraphs.push_back(buffer);
 		}
-	}
 
-	void consumer_fantasy() {
-		std::unique_lock<std::mutex> lck(mtx);
-		while(!end.load()) {
-			consume.wait(lck);
-			if (end.load() == true) {
-				break;
+		unsigned int potential_threads = small_paragraphs.size();
+		consumers_nr = std::min(potential_threads, std::thread::hardware_concurrency() - 1);
+
+    	for (int i = 0; i < consumers_nr; ++i) {
+    		if (id == HORROR_ID) {
+    			consumers[i] = std::thread(consumer_horror);
+    		} else if (id == COMEDY_ID) {
+    			consumers[i] = std::thread(consumer_comedy);
+    		} else if (id == FANTASY_ID) {
+    			consumers[i] = std::thread(consumer_fantasy);
+    		} else if (id == SCIFI_ID) {
+    			consumers[i] = std::thread(consumer_scifi);
+    		}
+    	}
+    	for (int i = 0; i < consumers_nr; ++i) {
+			consumers[i].join();
+		}
+		current_ticket = 0;
+
+		buffer = "";
+		for (int i = 0; i < small_paragraphs.size(); ++i) {
+			if (i != small_paragraphs.size() - 1) {
+				buffer += small_paragraphs[i] + '\n';
+			} else {
+				buffer += small_paragraphs[i];
 			}
-		 	int ticket = get_ticket();
-		 	int remaining_lines = 0;
-
-		 	while(ticket <= line_nr / 20) {
-		 		remaining_lines = 20 * ticket + 1;
-		 		int i = 0;
-		 		while (i < buffer.size() && remaining_lines > 0) {
-		 			if (buffer[i] == '\n') {
-		 				--remaining_lines;
-		 			}
-		 			++i;
-		 		}
-
-		 		remaining_lines = 20;
-		 		while (i < buffer.size() && remaining_lines > 0) {
-		 			if (buffer[i] == '\n') {
-		 				--remaining_lines;
-		 			}
-
-		 			if ((buffer[i - 1] == ' ' || buffer[i - 1] == '\n') && letter(buffer[i])) {
-		 				buffer[i] = std::toupper(buffer[i]);
-		 			}
-		 			++i;
-		 		}
-
-		 		ticket = get_ticket();
-		 	}
-		 	if (remaining_lines > 0) {
-		 		produce.notify_one();
-		 		current_ticket = 0;
-		 	}
 		}
+		MPI_Send(&buffer[0], buffer.size() + 1, MPI_CHAR, ROOT, 0, MPI_COMM_WORLD);
 	}
+}
 
-	void consumer_comedy() {
-		std::unique_lock<std::mutex> lck(mtx);
-		while(!end.load()) {
-			consume.wait(lck);
-			if (end.load() == true) {
-				break;
-			}
-		 	int ticket = get_ticket();
-		 	int remaining_lines = 0;
-
-		 	while(ticket <= line_nr / 20) {
-		 		remaining_lines = 20 * ticket + 1;
-		 		int i = 0;
-		 		while (i < buffer.size() && remaining_lines > 0) {
-		 			if (buffer[i] == '\n') {
-		 				--remaining_lines;
-		 			}
-		 			++i;
-		 		}
-
-		 		remaining_lines = 20;
-		 		int letter_index = 0;
-		 		while (i < buffer.size() && remaining_lines > 0) {
-		 			if (buffer[i] == '\n') {
-		 				--remaining_lines;
-		 			}
-
-		 			if (buffer[i] == ' ') {
-		 				letter_index = 0;
-		 			} else if (letter(buffer[i])) {
-		 				if (letter_index++ % 2) {
-		 					buffer[i] = std::toupper(buffer[i]);
-		 				}
-		 			}
-		 			++i;
-		 		}
-
-		 		ticket = get_ticket();
-		 	}
-		 	if (remaining_lines > 0) {
-		 		produce.notify_one();
-		 		current_ticket = 0;
-		 	}
-		}
-	}
-
- 	void consumer_horror() {
- 		std::unique_lock<std::mutex> lck(mtx);
-		while(!end.load()) {
-			consume.wait(lck);
-			if (end.load() == true) {
-				break;
-			}
-		 	int ticket = get_ticket();
-		 	int remaining_lines = 0;
-
-		 	while(ticket <= line_nr / 20) {
-		 		remaining_lines = 20 * ticket + 1;
-		 		int i = 0;
-		 		while (i < buffer.size() && remaining_lines > 0) {
-		 			if (buffer[i] == '\n') {
-		 				--remaining_lines;
-		 			}
-		 			++i;
-		 		}
-
-		 		remaining_lines = 20;
-		 		while (i < buffer.size() && remaining_lines > 0) {
-		 			if (buffer[i] == '\n') {
-		 				--remaining_lines;
-		 			}
-		 			if (consonant(buffer[i])) {
-		 				std::string lower (1, std::tolower(buffer[i]));
-		 				buffer.insert(i + 1, lower);
-		 				++i;
-		 			}
-		 			++i;
-		 		}
-
-		 		ticket = get_ticket();
-		 	}
-		 	if (remaining_lines > 0) {
-		 		produce.notify_one();
-		 		current_ticket = 0;
-		 	}
-		}
-	}
-};
+void parallelise(int id) {
+	std::thread receiver = std::thread(recv, id);
+	receiver.join();
+}
